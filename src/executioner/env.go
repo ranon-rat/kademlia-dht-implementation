@@ -1,0 +1,21 @@
+package executioner
+
+import (
+	"os"
+	"slices"
+	"strings"
+)
+
+// this is mostly used to avoid sharing anything with the other projects
+// since this project is small i dont need to have much stuff.
+func LoadLocalEnviroments() []string {
+	ourEnvs := os.Environ()
+	envs := make([]string, 0, len(ourEnvs))
+	for _, env := range ourEnvs {
+		if slices.Contains([]string{"PORT", "PASSWORD"}, strings.Split(env, "=")[0]) {
+			continue
+		}
+		envs = append(envs, env)
+	}
+	return envs
+}

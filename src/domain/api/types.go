@@ -12,6 +12,16 @@ type ResultSearch struct {
 	CloseNodes *[]custom.Distance2Node `json:"node"`
 }
 type Message struct {
-	Content string
-	ID      string
+	Content string `json:"content"`
+	ID      string `json:"id"`
+}
+
+type StartServices struct {
+	FromPort int `json:"from_port"`
+	Amount   int `json:"amount"`
+}
+type RunningNode struct {
+	Port int    `json:"port"`
+	ID   uint64 `json:"id"`
+	URL  string `json:"url"`
 }
