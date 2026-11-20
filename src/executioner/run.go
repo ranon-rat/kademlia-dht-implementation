@@ -118,7 +118,9 @@ func Executioner(process *executionerD.StartProcess) {
 		fmt.Println(lastErrStr)
 		if ctx.Err() == context.Canceled {
 			//
-			Send(channel, err.Error(), process.ID)
+			if err != nil {
+				Send(channel, err.Error(), process.ID)
+			}
 			goto justClean
 		}
 		// i am managing the port binding just after this. I should have something to manage any weird behaviour

@@ -32,6 +32,7 @@ func NewRoutingTable(id identity.KademliaIdentity, amountBuckets, closeReturns, 
 		MaxPerBucket:    maxPerBucket,
 		AmountNodes:     0,
 		CloseReturns:    closeReturns,
+		mu:              new(sync.RWMutex),
 		AmountBuckets:   amountBuckets,
 		MaxAmountNodes:  maxPerBucket * amountBuckets,
 	}
@@ -67,7 +68,7 @@ func (rt *RoutingTable) GetCloseNodesToKey(key uint64) []Distance2Node {
 	}
 
 	distances[len(distances)-1].XorDistance = rt.CurrentIdentity.ID ^ key
-	distances[len(distances)-1].ID = rt.CurrentIdentity.ID
+	distances[len(distances)-1].KademliaIdentity = rt.CurrentIdentity
 
 	sort.Slice(distances, func(i, j int) bool {
 
@@ -109,7 +110,9 @@ func (rt *RoutingTable) GetIndexForNode(newID uint64) int {
 	return rt.getIndexForLocked(newID)
 }
 func (rt *RoutingTable) AddNewNode(newIdentity identity.KademliaIdentity) bool {
-	// we should define it based on the distance that we have from ourselves :D
+	if newIdentity.ID == rt.CurrentIdentity.ID {
+		return false
+	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	index := rt.getIndexForLocked(newIdentity.ID)
@@ -131,9 +134,8 @@ func (rt *RoutingTable) DeleteNode(nodeID uint64) {
 	defer rt.mu.Unlock()
 	removed := 0
 
-	for _, bucket := range rt.Buckets {
-		// i should do something different here
-		bucket.DeleteFunc(func(v identity.KademliaIdentity) bool {
+	for i := range rt.Buckets {
+		rt.Buckets[i].DeleteFunc(func(v identity.KademliaIdentity) bool {
 			if v.ID != nodeID {
 				return false
 			}

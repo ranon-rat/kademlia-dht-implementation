@@ -18,15 +18,19 @@ import (
 func GetMore(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
-	id, _ := strconv.Atoi(query.Get("id"))
+	id, err := strconv.ParseUint(query.Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid identity", http.StatusBadRequest)
+		return
+	}
 	urlQ := query.Get("url")
 
-	json.MarshalWrite(w, routingTable.GetCloseNodesToKey(uint64(id)))
+	json.MarshalWrite(w, routingTable.GetCloseNodesToKey(id))
 	if _, err := Ask4Info(urlQ); err != nil {
 		return
 	}
 	routingTable.AddNewNode(identity.KademliaIdentity{
-		ID:  uint64(id),
+		ID:  id,
 		Url: urlQ,
 	})
 }
@@ -39,8 +43,9 @@ func Ask4More(urlq string) ([]custom.Distance2Node, error) {
 	}
 	params := url.Values{}
 	params.Add("url", identityDHT.Url)
-	params.Add("id", strconv.Itoa(int(identityDHT.ID)))
+	params.Add("id", strconv.FormatUint(identityDHT.ID, 10))
 
+	baseURL.Path = "/more"
 	baseURL.RawQuery = params.Encode()
 	resp, err := http.Get(baseURL.String())
 	if err != nil {
@@ -62,6 +67,7 @@ func AskForNodeSeries(nodes []identity.KademliaIdentity) ([]identity.KademliaIde
 		nodes, err := Ask4More(n.Url)
 		if err != nil {
 			fmt.Printf("Failed to connect to: %d url: %s\n", n.ID, n.Url)
+			continue
 		}
 		goodNodes = append(goodNodes, n)
 		if len(nodes) > 0 {
@@ -100,7 +106,7 @@ func SetupNodes(initialNodes []identity.KademliaIdentity, maxhops int) int {
 	// then i get the ones that are closer to me
 
 	for range maxhops + 1 {
-		if routingTable.AmountNodes == routingTable.MaxAmountNodes {
+		if len(routingTable.GetAllNodes()) == routingTable.MaxAmountNodes {
 			return len(alreadyVisited)
 		}
 		newNodes, goodNodes = AskForNodeSeries(newNodes)

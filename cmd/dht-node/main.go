@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net"
+	"net/http"
 	"strconv"
 
 	"github.com/ranon-rat/kademlia-dht-implementation/src/domain"
@@ -28,6 +31,11 @@ func main() {
 	}
 	g := domain.StartKademliaGlobals(ID, port)
 	events.SetGlobals(g)
+	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	if err != nil {
+		log.Fatal(err)
+	}
+	go func() { log.Fatal(http.Serve(listener, events.Router())) }()
 	if possibleServers != "" {
 		identities, err := identity.ParseIdentities(possibleServers)
 		if err != nil {
@@ -37,5 +45,5 @@ func main() {
 		events.SetupNodes(identities, 10)
 	}
 	fmt.Println(g)
-	events.Setup(strconv.Itoa(port))
+	select {}
 }

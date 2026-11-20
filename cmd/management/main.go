@@ -7,144 +7,222 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ranon-rat/kademlia-dht-implementation/src/domain/api"
 	executionerD "github.com/ranon-rat/kademlia-dht-implementation/src/domain/executioner"
 	"github.com/ranon-rat/kademlia-dht-implementation/src/domain/safe"
 	"github.com/ranon-rat/kademlia-dht-implementation/src/executioner"
+	"github.com/ranon-rat/kademlia-dht-implementation/static"
 )
 
 var currentRunningServers = safe.NewMap[uint64, api.RunningNode]()
-var globalCtx = context.Background()
-var currentDir = ""
+var currentDir string
+
+// Serialize process lifecycle operations; the map only locks individual reads/writes.
+var servicesMu sync.Mutex
+var nodeTransport = &http.Transport{ResponseHeaderTimeout: 10 * time.Second}
 
 const maxNodesAmount = 5
 
 func GetShuffledNodeList() []api.RunningNode {
-	shuffled := currentRunningServers.Values()
-	rand.Shuffle(2, func(i int, j int) {
-		tmp := shuffled[j]
-		shuffled[j] = shuffled[i]
-		shuffled[i] = tmp
-	})
-	return shuffled[:min(maxNodesAmount, len(shuffled))]
+	nodes := currentRunningServers.Values()
+	rand.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
+	return nodes[:min(maxNodesAmount, len(nodes))]
 }
 
 func RunningProjectsIntoString(nodes []api.RunningNode) string {
-	nodesStr := make([]string, len(nodes))
+	parts := make([]string, len(nodes))
 	for i, n := range nodes {
-		nodesStr[i] = fmt.Sprintf("%d,%s", n.ID, n.URL)
+		parts[i] = fmt.Sprintf("%d,%s", n.ID, n.URL)
 	}
-	return strings.Join(nodesStr, ";")
+	return strings.Join(parts, ";")
 }
-func GenerateCommand(rNode *api.RunningNode) string {
-	output := fmt.Sprintf("./bin/node -ID %d -port %d", rNode.ID, rNode.Port)
+
+func GenerateCommand(node *api.RunningNode) string {
+	command := fmt.Sprintf("./bin/node -ID %d -port %d", node.ID, node.Port)
 	if currentRunningServers.Len() > 0 {
-		nodes := GetShuffledNodeList()
-		output += "-servers " + RunningProjectsIntoString(nodes)
+		command += " -servers '" + RunningProjectsIntoString(GetShuffledNodeList()) + "'"
 	}
-	return output
-
+	return command
 }
-func StartServices(conf *api.StartServices) {
 
+func stopServices() {
 	for id := range currentRunningServers.Snapshot() {
-		currentRunningServers.Delete(id)
 		executioner.StopProcess(id)
+		currentRunningServers.Delete(id)
 	}
+}
 
-	port := conf.FromPort
-	for range conf.Amount {
-		url := fmt.Sprintf("http://localhost:%d", port)
-		id := rand.Uint64()
-		runningNode := api.RunningNode{
-			ID:   id,
-			Port: port,
-			URL:  url,
+func StartServices(conf *api.StartServices) error {
+	stopServices()
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	for i := range conf.Amount {
+		port := conf.FromPort + i
+		node := api.RunningNode{ID: rand.Uint64(), Port: port, URL: fmt.Sprintf("http://localhost:%d", port)}
+		// Start each process before publishing it as a bootstrap peer.
+		if err := executioner.StartProcess(&executionerD.StartProcess{Dir: currentDir, ID: node.ID, Command: GenerateCommand(&node)}); err != nil {
+			return err
 		}
-		currentRunningServers.Set(id, runningNode)
-		go executioner.StartProcess(&executionerD.StartProcess{
-			Dir:     currentDir,
-			ID:      id,
-			Command: GenerateCommand(&runningNode),
-		})
-		port++
+		ready := false
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			resp, err := client.Get(node.URL + "/info")
+			if err == nil {
+				var actual struct {
+					ID uint64 `json:"id"`
+				}
+				decodeErr := json.UnmarshalRead(resp.Body, &actual)
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK && decodeErr == nil && actual.ID == node.ID {
+					ready = true
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if !ready {
+			executioner.StopProcess(node.ID)
+			stopServices()
+			return fmt.Errorf("could not start node on port %d; check that the port is available and run make build-node", port)
+		}
+		currentRunningServers.Set(node.ID, node)
 	}
+	return nil
 }
 
-// POST /start-services
 func PostServices(w http.ResponseWriter, r *http.Request) {
-	var startServices api.StartServices
-	if err := json.UnmarshalRead(r.Body, startServices); err != nil {
+	var conf api.StartServices
+	if err := json.UnmarshalRead(http.MaxBytesReader(w, r.Body, 4096), &conf); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	StartServices(&startServices)
-	json.MarshalWrite(w, currentRunningServers.Values())
+	if conf.Amount < 1 || conf.Amount > 50 || conf.FromPort < 1024 || conf.FromPort > 65536-conf.Amount || (conf.FromPort <= 8080 && conf.FromPort+conf.Amount > 8080) {
+		http.Error(w, "Use 1 to 50 nodes and ports from 1024 to 65535, excluding 8080", 400)
+		return
+	}
+	servicesMu.Lock()
+	defer servicesMu.Unlock()
+	if err := StartServices(&conf); err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	GetAllServices(w, r)
 }
 
-// DELETE /delete-service
 func TurnServiceDown(w http.ResponseWriter, r *http.Request) {
-
-	idstr := r.URL.Query().Get("id")
-	id, err := strconv.ParseUint(idstr, 10, 64)
+	id, err := strconv.ParseUint(r.URL.Query().Get("id"), 10, 64)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		http.Error(w, "invalid node id", 400)
 		return
 	}
-	currentRunningServers.Delete(id)
-	executioner.StopProcess(id)
-	w.Write([]byte("done"))
-}
-
-// DELETE /delete-services
-func TurnAllServicesDown(w http.ResponseWriter, r *http.Request) {
-	for id := range currentRunningServers.Snapshot() {
-		currentRunningServers.Delete(id)
-		executioner.StopProcess(id)
+	servicesMu.Lock()
+	defer servicesMu.Unlock()
+	if _, exists := currentRunningServers.Get(id); !exists {
+		http.NotFound(w, r)
+		return
 	}
-	w.Write([]byte("done"))
+	executioner.StopProcess(id)
+	currentRunningServers.Delete(id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /all-services
+func TurnAllServicesDown(w http.ResponseWriter, r *http.Request) {
+	servicesMu.Lock()
+	defer servicesMu.Unlock()
+	stopServices()
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func GetAllServices(w http.ResponseWriter, r *http.Request) {
-	json.MarshalWrite(w, currentRunningServers.Values())
+	// uint64 identifiers must travel as strings to preserve their bits in JavaScript.
+	type nodeView struct {
+		ID   string `json:"id"`
+		Port int    `json:"port"`
+		URL  string `json:"url"`
+	}
+	nodes := make([]nodeView, 0, currentRunningServers.Len())
+	for _, n := range currentRunningServers.Values() {
+		nodes = append(nodes, nodeView{strconv.FormatUint(n.ID, 10), n.Port, n.URL})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.MarshalWrite(w, nodes)
 }
-func RouterSetup() {
 
-	http.HandleFunc("/start-services", PostServices)
-	http.HandleFunc("/delete-service", TurnServiceDown)
-	http.HandleFunc("/delete-services", TurnAllServicesDown)
-	http.HandleFunc("/all-services", GetAllServices)
-	http.ListenAndServe(":8080", nil)
+func NodeRequest(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid node id", 400)
+		return
+	}
+	node, exists := currentRunningServers.Get(id)
+	if !exists {
+		http.NotFound(w, r)
+		return
+	}
+	action := r.PathValue("action")
+	allowed := map[string]string{"info": "GET", "more": "GET", "store": "POST", "get": "GET", "get-local-search": "GET", "messages": "GET,POST"}
+	methods, exists := allowed[action]
+	if !exists {
+		http.NotFound(w, r)
+		return
+	}
+	if !strings.Contains(","+methods+",", ","+r.Method+",") {
+		w.Header().Set("Allow", methods)
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	target, _ := url.Parse(node.URL)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = nodeTransport
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		http.Error(w, "The node did not respond: "+err.Error(), 502)
+	}
+	r.URL.Path = "/" + action
+	proxy.ServeHTTP(w, r)
+}
+
+func Router() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /start-services", PostServices)
+	mux.HandleFunc("DELETE /delete-service", TurnServiceDown)
+	mux.HandleFunc("DELETE /delete-services", TurnAllServicesDown)
+	mux.HandleFunc("GET /all-services", GetAllServices)
+	mux.HandleFunc("/nodes/{id}/{action}", NodeRequest)
+	mux.Handle("/", http.FileServer(http.FS(static.Files)))
+	return mux
 }
 
 func main() {
 	var err error
 	currentDir, err = os.Getwd()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	fmt.Println(currentDir)
-	var stop context.CancelFunc
-
-	globalCtx, stop = signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,    // SIGINT (Ctrl+C)
-		syscall.SIGTERM, // SIGTERM (kill)
-		syscall.SIGQUIT, // SIGQUIT (Ctrl+\)
-	)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
-
 	executioner.Setup()
-	go RouterSetup()
-	<-globalCtx.Done() // ⛔ wait for systemd signal
-	log.Println("Shutdown signal received")
-	executioner.StoppingAll(globalCtx)
-	log.Println("Cleanup finished, exiting")
+	server := &http.Server{Addr: "127.0.0.1:8080", Handler: Router(), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		log.Println("Management: http://localhost:8080")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Print(err)
+			stop()
+		}
+	}()
+	<-ctx.Done()
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server.Shutdown(shutdown)
+	servicesMu.Lock()
+	defer servicesMu.Unlock()
+	stopServices()
 }

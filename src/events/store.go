@@ -16,11 +16,13 @@ func PostStore(w http.ResponseWriter, r *http.Request) {
 	// this would be so I can
 	var store api.Store
 	if err := json.UnmarshalRead(r.Body, &store); err != nil {
-		http.Error(w, err.Error(), 404)
+		http.Error(w, err.Error(), 400)
+		return
 	}
 
-	v, _ := hashMap.Get(store.Key)
-	if v == store.Value { // this just means that we are storing this already
+	// Swap makes storing and checking the previous value one atomic operation.
+	v, exists := hashMap.Swap(store.Key, store.Value)
+	if exists && v == store.Value {
 		return
 	}
 
@@ -29,22 +31,27 @@ func PostStore(w http.ResponseWriter, r *http.Request) {
 	possibleNodes := routingTable.GetCloseNodesToKey(key)
 
 	for _, node := range possibleNodes {
+		if node.ID == identityDHT.ID {
+			continue
+		}
 		if StoreRequest(node.Url, &store) == nil {
 			continue
 		}
 		routingTable.DeleteNode(node.ID)
 	}
-	hashMap.Put(store.Key, store.Value)
 }
 
 func StoreRequest(urlq string, store *api.Store) error {
 	completeRoute := fmt.Sprintf("%s/store", urlq)
 	content, _ := json.Marshal(store)
-	resp, err := http.Post(completeRoute, "text/json", bytes.NewBuffer(content))
+	resp, err := http.Post(completeRoute, "application/json", bytes.NewBuffer(content))
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("store: %s", resp.Status)
+	}
 	return nil
 }
 
@@ -52,7 +59,8 @@ func StoreRequest(urlq string, store *api.Store) error {
 
 func GetStore(w http.ResponseWriter, r *http.Request) {
 	userKey := r.URL.Query().Get("key")
-	if result, exists := hashMap.Get(userKey); exists {
+	if stored, exists := hashMap.Load(userKey); exists {
+		result := stored.(string)
 		json.MarshalWrite(w, api.ResultSearch{
 			Value: &result,
 		})
@@ -74,6 +82,7 @@ func AskForGetStore(urlq, userkey string) (*api.ResultSearch, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 	out := new(api.ResultSearch)
 	if err := json.UnmarshalRead(resp.Body, out); err != nil {
 		return nil, err
@@ -84,7 +93,8 @@ func AskForGetStore(urlq, userkey string) (*api.ResultSearch, error) {
 // [GET] /get-local-search
 func GetLocalSearch(w http.ResponseWriter, r *http.Request) {
 	userKey := r.URL.Query().Get("key")
-	if result, exists := hashMap.Get(userKey); exists {
+	if stored, exists := hashMap.Load(userKey); exists {
+		result := stored.(string)
 		json.MarshalWrite(w, api.ResultSearch{
 			Value: &result,
 		})

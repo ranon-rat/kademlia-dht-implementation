@@ -17,6 +17,7 @@ func NewQueue[T any](maxSize int) Queue[T] {
 	return Queue[T]{
 		Contents: make([]T, 0, maxSize),
 		MaxSize:  maxSize,
+		mutex:    new(sync.RWMutex),
 	}
 }
 
@@ -33,7 +34,7 @@ func (q *Queue[T]) Push(value T) bool {
 	return newAdded
 }
 
-func (q Queue[T]) Snapshot() []T {
+func (q *Queue[T]) Snapshot() []T {
 	q.mutex.RLock()
 	out := append(make([]T, 0, q.MaxSize), q.Contents...)
 	q.mutex.RUnlock()
