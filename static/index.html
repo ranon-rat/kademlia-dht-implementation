@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kademlia · Nodes</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main>
+    <h1>Kademlia</h1>
+    <p>Manage nodes and test network routes.</p>
+    <form id="services">
+      <fieldset>
+        <legend>Services</legend>
+        <label>Starting port <input name="from_port" type="number" min="1024" max="65535" value="9000" required></label>
+        <label>Node count <input name="amount" type="number" min="1" max="50" value="3" required></label>
+        <button>Start / replace nodes</button>
+        <button id="refresh" type="button">Refresh list</button>
+        <button id="stop-all" type="button">Stop all</button>
+      </fieldset>
+    </form>
+    <p id="status" role="status" aria-live="polite">Loading nodes…</p>
+    <form id="operation">
+      <fieldset id="node-controls" disabled>
+        <legend>Node operations</legend>
+        <label>Node <select id="node" required></select></label>
+        <button id="stop-node" type="button">Stop selected node</button>
+        <label>Operation
+          <select id="action">
+            <option value="info">View identity · GET /info</option>
+            <option value="more">Discover nodes · GET /more</option>
+            <option value="store">Store value · POST /store</option>
+            <option value="get">Search the network · GET /get</option>
+            <option value="get-local-search">Search this node only · GET /get-local-search</option>
+            <option value="messages">Read messages · GET /messages</option>
+            <option value="send-message">Send message · POST /messages</option>
+          </select>
+        </label>
+        <div id="identity-fields" hidden>
+          <label>Identify as <select id="identity"></select></label>
+          <p>The queried node returns its neighbors and registers the selected identity using its ID and URL.</p>
+        </div>
+        <p id="search-help" hidden>The search follows nodes returned by /get and visits each node once. The response includes the search trace and any errors. The starting node counts as 0 hops. Limit: 100 queries to nodes managed here.</p>
+        <label id="key-field" hidden>Key <input id="key" name="key"></label>
+        <label id="value-field" hidden>Value <textarea id="value" name="value"></textarea></label>
+        <label id="message-field" hidden>Message <textarea id="message" name="message"></textarea></label>
+        <button id="execute">Run</button>
+      </fieldset>
+    </form>
+    <h2>Response</h2>
+    <p id="request"></p>
+    <p id="search-summary" role="status"></p>
+    <pre id="result" aria-live="polite">Select a node and an operation.</pre>
+  </main>
+</body>
+</html>
