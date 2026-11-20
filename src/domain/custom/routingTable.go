@@ -23,7 +23,7 @@ type Distance2Node struct {
 	XorDistance uint64
 }
 
-// you should select 6 btw thats because the key is 64 bits long and the ideal amount of buckets should be log2(n) the n being the amount of bits that a key has
+// Each bucket stores peers in a logarithmic XOR-distance range.
 func NewRoutingTable(id identity.KademliaIdentity, amountBuckets, closeReturns, maxPerBucket int) *RoutingTable {
 	out := new(RoutingTable)
 	*out = RoutingTable{
@@ -44,10 +44,15 @@ func NewRoutingTable(id identity.KademliaIdentity, amountBuckets, closeReturns, 
 }
 
 func (rt *RoutingTable) PopulateRanges() {
-	bucketslen := rt.AmountBuckets
-	rangesBuckets := make([]uint64, bucketslen)
-	for i := range bucketslen {
-		rangesBuckets[i] = 1 << (i + 1)
+	if rt.AmountBuckets < 1 || rt.AmountBuckets > 64 {
+		panic("routing table must have between 1 and 64 buckets")
+	}
+	// Keep the farthest XOR ranges separate. With fewer than 64 buckets,
+	// merge the nearest ranges into bucket zero instead of putting almost
+	// every randomly generated uint64 identity in the last bucket.
+	rangesBuckets := make([]uint64, rt.AmountBuckets)
+	for i := 1; i < rt.AmountBuckets; i++ {
+		rangesBuckets[i] = uint64(1) << (64 - rt.AmountBuckets + i)
 	}
 	rt.rangesBuckets = rangesBuckets
 }
@@ -79,29 +84,9 @@ func (rt *RoutingTable) GetCloseNodesToKey(key uint64) []Distance2Node {
 
 func (rt *RoutingTable) getIndexForLocked(newID uint64) int {
 	distance := rt.CurrentIdentity.ID ^ newID
-	i := 0
-	movingAround := (rt.AmountBuckets) / 2
-	for {
-		currentValue := rt.rangesBuckets[i]
-		var next uint64 = 0
-		if i+1 < rt.AmountBuckets {
-			next = rt.rangesBuckets[i+1]
-		}
-		if distance >= currentValue && (distance < next || next == 0) {
-			return i
-		}
-		if distance >= currentValue && next != 0 {
-			i = min(i+movingAround, rt.AmountBuckets-1)
-			movingAround = max(movingAround/2, 1)
-			continue
-		}
-		if distance < currentValue && i > 0 {
-			i = max(i-movingAround, 0)
-			movingAround = max(movingAround/2, 1)
-			continue
-		}
-		return i
-	}
+	return sort.Search(len(rt.rangesBuckets), func(i int) bool {
+		return rt.rangesBuckets[i] > distance
+	}) - 1
 }
 
 func (rt *RoutingTable) GetIndexForNode(newID uint64) int {

@@ -4,6 +4,7 @@ export interface SearchNode {
 }
 
 interface Candidate extends SearchNode {
+  parent?: SearchNode;
   distance: bigint;
   hops: number;
 }
@@ -18,6 +19,7 @@ export interface SearchResponse {
 }
 
 export interface SearchStep {
+  parent?: SearchNode;
   node: SearchNode;
   status: string;
   hops: number;
@@ -38,8 +40,9 @@ export interface SearchResult {
 export async function searchNetwork(
   start: SearchNode,
   fetchNode: (node: SearchNode) => Promise<SearchResponse>,
-  onVisit: (node: SearchNode) => void = () => {},
+  onVisit: (node: SearchNode, hops: number, parent?: SearchNode) => void = () => {},
   maxVisits = 100,
+  onStep: (step: SearchStep) => void = () => {},
 ): Promise<SearchResult> {
   const pending: Candidate[] = [
     {
@@ -50,6 +53,11 @@ export async function searchNetwork(
   ];
   const queued = new Set([start.id]);
   const trace: SearchStep[] = [];
+
+  function recordStep(step: SearchStep): void {
+    trace.push(step);
+    onStep(step);
+  }
 
   while (pending.length && trace.length < maxVisits) {
     pending.sort((a, b) => {
@@ -69,13 +77,14 @@ export async function searchNetwork(
       id: current.id,
       url: current.url,
     };
-    onVisit(node);
+    onVisit(node, current.hops, current.parent);
 
     try {
       const response = await fetchNode(node);
 
       if (typeof response.value === "string") {
-        trace.push({
+        recordStep({
+          parent: current.parent,
           node,
           hops: current.hops,
           status: "Value found",
@@ -98,10 +107,12 @@ export async function searchNetwork(
           url: peer.value,
           distance: BigInt(peer.XorDistance),
           hops: current.hops + 1,
+          parent: node,
         };
       });
 
-      trace.push({
+      recordStep({
+        parent: current.parent,
         node,
         hops: current.hops,
         status: "No local value; checking candidates",
@@ -117,7 +128,8 @@ export async function searchNetwork(
         pending.push(candidate);
       }
     } catch (error) {
-      trace.push({
+      recordStep({
+        parent: current.parent,
         node,
         hops: current.hops,
         status: `Error: ${error instanceof Error ? error.message : String(error)}`,

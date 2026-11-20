@@ -31,7 +31,7 @@ var currentDir string
 var servicesMu sync.Mutex
 var nodeTransport = &http.Transport{ResponseHeaderTimeout: 10 * time.Second}
 
-const maxNodesAmount = 5
+const maxNodesAmount = 20
 
 func GetShuffledNodeList() []api.RunningNode {
 	nodes := currentRunningServers.Values()
@@ -169,7 +169,7 @@ func NodeRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.PathValue("action")
-	allowed := map[string]string{"info": "GET", "more": "GET", "store": "POST", "get": "GET", "get-local-search": "GET", "messages": "GET,POST"}
+	allowed := map[string]string{"info": "GET", "peers": "GET", "more": "GET", "store": "POST", "get": "GET", "get-local-search": "GET", "messages": "GET,POST"}
 	methods, exists := allowed[action]
 	if !exists {
 		http.NotFound(w, r)

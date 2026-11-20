@@ -1,6 +1,7 @@
 package events
 
 import (
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,5 +58,51 @@ func TestGetKeepsReturningCandidatesAndLocalSearchStaysLocal(t *testing.T) {
 	router.ServeHTTP(w, httptest.NewRequest("GET", "/get-local-search?key=missing", nil))
 	if w.Code != 404 {
 		t.Fatalf("local lookup: %d", w.Code)
+	}
+}
+
+func TestPeersReturnsKnownIdentities(t *testing.T) {
+	SetGlobals(domain.StartKademliaGlobals(1, 9001))
+	peer := identity.KademliaIdentity{ID: 18446744073709551615, Url: "http://localhost:9002"}
+	routingTable.AddNewNode(peer)
+	w := httptest.NewRecorder()
+	Router().ServeHTTP(w, httptest.NewRequest("GET", "/peers", nil))
+	if w.Code != 200 || w.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("peers response: %d %s", w.Code, w.Body)
+	}
+	var peers []identity.KademliaIdentity
+	if err := json.Unmarshal(w.Body.Bytes(), &peers); err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 1 || peers[0] != peer {
+		t.Fatalf("unexpected peers: %+v", peers)
+	}
+	routingTable.DeleteNode(peer.ID)
+	w = httptest.NewRecorder()
+	Router().ServeHTTP(w, httptest.NewRequest("GET", "/peers", nil))
+	if w.Body.String() != "[]" {
+		t.Fatalf("deleted peer remains: %s", w.Body)
+	}
+}
+
+func TestPeersReturnsAllBuckets(t *testing.T) {
+	SetGlobals(domain.StartKademliaGlobals(123, 9001))
+	for bucket := range 6 {
+		for offset := range 4 {
+			distance := uint64(offset + 1)
+			if bucket > 0 {
+				distance = uint64(1)<<(58+bucket) + uint64(offset)
+			}
+			routingTable.AddNewNode(identity.KademliaIdentity{ID: identityDHT.ID ^ distance, Url: "http://localhost"})
+		}
+	}
+	w := httptest.NewRecorder()
+	Router().ServeHTTP(w, httptest.NewRequest("GET", "/peers", nil))
+	var peers []identity.KademliaIdentity
+	if err := json.Unmarshal(w.Body.Bytes(), &peers); err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 24 {
+		t.Fatalf("/peers returned %d entries, want 24", len(peers))
 	}
 }

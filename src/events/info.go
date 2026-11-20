@@ -25,3 +25,9 @@ func Ask4Info(urlQ string) (*identity.KademliaIdentity, error) {
 	}
 	return out, nil
 }
+
+// GetPeers returns the identities currently known in this node's routing table.
+func GetPeers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.MarshalWrite(w, routingTable.GetAllNodes())
+}

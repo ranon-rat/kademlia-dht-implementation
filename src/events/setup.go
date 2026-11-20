@@ -27,6 +27,7 @@ func Router() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /info", GetInfo)
+	mux.HandleFunc("GET /peers", GetPeers)
 	mux.HandleFunc("GET /more", GetMore)
 	mux.HandleFunc("POST /store", PostStore)
 	// this sends a message to all the network

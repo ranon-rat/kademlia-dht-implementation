@@ -14,6 +14,9 @@ type Queue[T any] struct {
 }
 
 func NewQueue[T any](maxSize int) Queue[T] {
+	if maxSize <= 0 {
+		panic("the fuck you doing?")
+	}
 	return Queue[T]{
 		Contents: make([]T, 0, maxSize),
 		MaxSize:  maxSize,
@@ -22,16 +25,19 @@ func NewQueue[T any](maxSize int) Queue[T] {
 }
 
 func (q *Queue[T]) Push(value T) bool {
-
-	newAdded := true
 	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	added := true
 	if len(q.Contents) >= q.MaxSize {
-		q.Contents = q.Contents[min(1, len(q.Contents)):]
-		newAdded = false
+		copy(q.Contents, q.Contents[1:])
+		var zero T
+		q.Contents[len(q.Contents)-1] = zero
+		q.Contents = q.Contents[:len(q.Contents)-1]
+		added = false
 	}
 	q.Contents = append(q.Contents, value)
-	q.mutex.Unlock()
-	return newAdded
+	return added
 }
 
 func (q *Queue[T]) Snapshot() []T {
@@ -43,7 +49,7 @@ func (q *Queue[T]) Snapshot() []T {
 }
 func (q *Queue[T]) DeleteAt(index int) {
 	q.mutex.Lock()
-	q.Contents = slices.Delete(q.Contents, index, index)
+	q.Contents = slices.Delete(q.Contents, index, index+1)
 	q.mutex.Unlock()
 }
 
