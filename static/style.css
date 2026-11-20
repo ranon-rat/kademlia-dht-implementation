@@ -121,3 +121,105 @@ h3 { font-size: 12px; font-weight: 600; }
 .panel-heading, .request-line, .response-footer, .trace-summary, .panel-caption { flex-shrink: 0; }
 .trace-list { min-height: 0; }
 .graph-node.expanded:not(.selected) .graph-node-circle { fill: #234938; stroke: var(--green); }
+
+/* Keep the desktop console in one viewport, at the requested 80% scale. */
+@media (min-width: 1000px) {
+  body {
+    zoom: 0.8;
+  }
+
+  .sidebar {
+    padding: 20px;
+  }
+
+  .sidebar h1 {
+    font-size: 22px;
+  }
+
+  .sidebar .intro {
+    margin: .5rem 0 1.2rem;
+    font-size: 11px;
+  }
+
+  .sidebar fieldset {
+    margin-bottom: 1.2rem;
+  }
+
+  .sidebar label {
+    margin: .55rem 0;
+  }
+
+  .sidebar input,
+  .sidebar select,
+  .sidebar textarea {
+    padding: .5rem;
+  }
+
+  .console {
+    height: calc(100dvh / 0.8 - 62px);
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+
+  .peers-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .graph-canvas {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+  }
+
+  .graph-toolbar,
+  .graph-detail,
+  .graph-help,
+  .peers-panel > .hint {
+    flex-shrink: 0;
+  }
+
+  .graph-detail,
+  .peers-panel > .hint {
+    max-height: 4em;
+    overflow: auto;
+  }
+
+  .inspector-grid {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .trace-panel,
+  .response-panel {
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (min-width: 1000px) and (max-height: 760px) {
+  .graph-help {
+    display: none;
+  }
+}
+
+@media (min-width: 1000px) and (max-height: 650px) {
+  .sidebar h1,
+  .sidebar .intro {
+    display: none;
+  }
+
+  .sidebar > .section-label {
+    margin-bottom: 1rem;
+  }
+
+  .sidebar fieldset {
+    margin-bottom: 1rem;
+  }
+}

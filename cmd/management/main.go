@@ -31,7 +31,7 @@ var currentDir string
 var servicesMu sync.Mutex
 var nodeTransport = &http.Transport{ResponseHeaderTimeout: 10 * time.Second}
 
-const maxNodesAmount = 20
+const maxNodesAmount = 5
 
 func GetShuffledNodeList() []api.RunningNode {
 	nodes := currentRunningServers.Values()
