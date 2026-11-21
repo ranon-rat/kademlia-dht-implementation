@@ -45,11 +45,10 @@ func NewRoutingTable(id identity.KademliaIdentity, amountBuckets, closeReturns, 
 
 func (rt *RoutingTable) PopulateRanges() {
 	if rt.AmountBuckets < 1 || rt.AmountBuckets > 64 {
-		panic("routing table must have between 1 and 64 buckets")
+		panic("routing table must have between 1 and 6 buckets")
 	}
-	// Keep the farthest XOR ranges separate. With fewer than 64 buckets,
-	// merge the nearest ranges into bucket zero instead of putting almost
-	// every randomly generated uint64 identity in the last bucket.
+
+	rt.rangesBuckets = make([]uint64, rt.AmountBuckets)
 	rangesBuckets := make([]uint64, rt.AmountBuckets)
 	for i := 1; i < rt.AmountBuckets; i++ {
 		rangesBuckets[i] = uint64(1) << (64 - rt.AmountBuckets + i)

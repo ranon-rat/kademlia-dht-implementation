@@ -1,9 +1,10 @@
 package domain
 
 import (
+	"sync"
+
 	"github.com/ranon-rat/kademlia-dht-implementation/src/domain/custom"
 	"github.com/ranon-rat/kademlia-dht-implementation/src/domain/identity"
-	"sync"
 )
 
 type KademliaGlobals struct {
@@ -14,7 +15,7 @@ type KademliaGlobals struct {
 
 func StartKademliaGlobals(ID uint64, port int) *KademliaGlobals {
 	identity := identity.NewKademliaIdentity(ID, port)
-	routingTable := custom.NewRoutingTable(identity, 6, 6, 4)
+	routingTable := custom.NewRoutingTable(identity, 64, 6, 16)
 	hashMap := new(sync.Map)
 
 	return &KademliaGlobals{
