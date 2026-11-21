@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"net/http"
@@ -31,6 +32,7 @@ var currentDir string
 var servicesMu sync.Mutex
 var nodeTransport = &http.Transport{ResponseHeaderTimeout: 10 * time.Second}
 
+const maxNewNodes = 500
 const maxNodesAmount = 5
 
 func GetShuffledNodeList() []api.RunningNode {
@@ -87,7 +89,7 @@ func StartServices(conf *api.StartServices) error {
 					break
 				}
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(time.Millisecond)
 		}
 		if !ready {
 			executioner.StopProcess(node.ID)
@@ -105,7 +107,7 @@ func PostServices(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if conf.Amount < 1 || conf.Amount > 50 || conf.FromPort < 1024 || conf.FromPort > 65536-conf.Amount || (conf.FromPort <= 8080 && conf.FromPort+conf.Amount > 8080) {
+	if conf.Amount < 1 || conf.Amount > maxNewNodes || conf.FromPort < 1024 || conf.FromPort > 65536-conf.Amount || (conf.FromPort <= 8080 && conf.FromPort+conf.Amount > 8080) {
 		http.Error(w, "Use 1 to 50 nodes and ports from 1024 to 65535, excluding 8080", 400)
 		return
 	}
@@ -190,12 +192,41 @@ func NodeRequest(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
+// ExplorePeer reads routing peers by URL, including nodes not started by management.
+func ExplorePeer(w http.ResponseWriter, r *http.Request) {
+	target, err := url.Parse(r.URL.Query().Get("url"))
+	if err != nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
+		http.Error(w, "Provide an HTTP or HTTPS peer URL", http.StatusBadRequest)
+		return
+	}
+	target.Path = "/peers"
+	target.RawPath = ""
+	target.RawQuery = ""
+	target.Fragment = ""
+	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target.String(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	client := &http.Client{Transport: nodeTransport, Timeout: 10 * time.Second}
+	response, err := client.Do(upstream)
+	if err != nil {
+		http.Error(w, "The peer did not respond: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
+	w.WriteHeader(response.StatusCode)
+	io.Copy(w, response.Body)
+}
+
 func Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /start-services", PostServices)
 	mux.HandleFunc("DELETE /delete-service", TurnServiceDown)
 	mux.HandleFunc("DELETE /delete-services", TurnAllServicesDown)
 	mux.HandleFunc("GET /all-services", GetAllServices)
+	mux.HandleFunc("GET /explore-peer", ExplorePeer)
 	mux.HandleFunc("/nodes/{id}/{action}", NodeRequest)
 	mux.Handle("/", http.FileServer(http.FS(static.Files)))
 	return mux

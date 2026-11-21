@@ -62,7 +62,7 @@ h3 { font-size: 12px; font-weight: 600; }
 .graph-toolbar, .graph-legend, .graph-controls { display: flex; align-items: center; gap: 12px; }
 .graph-toolbar { justify-content: space-between; padding: 10px 16px 0; flex-wrap: wrap; }
 .graph-legend { color: var(--muted); font-size: 10px; }
-.graph-controls { gap: 5px; }
+.graph-controls { gap: 5px; flex-wrap: wrap; }
 .graph-canvas { height: clamp(250px, 34vh, 380px); overflow: hidden; background-image: radial-gradient(#243139 1px, transparent 1px); background-size: 20px 20px; }
 .graph-canvas svg { width: 100%; height: 100%; touch-action: none; cursor: grab; }
 .graph-canvas svg:active { cursor: grabbing; }
@@ -73,7 +73,6 @@ h3 { font-size: 12px; font-weight: 600; }
 .graph-node-circle { fill: #12251f; stroke: #6bad89; stroke-width: 2; }
 .graph-node.selected .graph-node-circle { fill: #193b2b; stroke: var(--green); stroke-width: 3; }
 .graph-node:hover .graph-node-circle, .graph-node:focus .graph-node-circle { stroke: #d0ffe0; stroke-width: 4; }
-.graph-node.external { cursor: help; }
 .graph-node.external .graph-node-circle { stroke: #748694; stroke-dasharray: 4 3; }
 .graph-node text { fill: var(--green); font-size: 14px; pointer-events: none; }
 .graph-node text.graph-node-id { fill: #a0b4be; font-size: 12px; }
@@ -222,4 +221,43 @@ h3 { font-size: 12px; font-weight: 600; }
   .sidebar fieldset {
     margin-bottom: 1rem;
   }
+}
+
+/* Expand the existing graph so its nodes and camera stay intact. */
+body.map-expanded {
+  zoom: 1;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.map-expanded .peers-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.map-expanded .graph-canvas {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+.map-expanded .graph-toolbar,
+.map-expanded .graph-detail,
+.map-expanded .graph-help,
+.map-expanded .peers-panel > .hint {
+  flex-shrink: 0;
+}
+
+.map-expanded .graph-controls {
+  flex-wrap: wrap;
+}
+
+.map-expanded .graph-help {
+  display: block;
 }

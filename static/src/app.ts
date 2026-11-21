@@ -45,7 +45,7 @@ const graph = new PeerGraph(
   element("peers"),
   element("graph-detail"),
   (id) => {
-    if (busy || !nodes.some((node) => node.id === id)) {
+    if (busy) {
       return;
     }
 
@@ -70,7 +70,7 @@ function showResponse(text: string): void {
 }
 
 async function expandGraphNode(id: string, epoch = peerRequest): Promise<void> {
-  const source = nodes.find((node) => node.id === id);
+  const source = graph.exploration.nodes.get(id) ?? nodes.find((node) => node.id === id);
 
   if (!source) {
     return;
@@ -80,7 +80,11 @@ async function expandGraphNode(id: string, epoch = peerRequest): Promise<void> {
   context.textContent = `Loading neighbors of ${source.url}…`;
 
   try {
-    const response = await request(`/nodes/${encodeURIComponent(id)}/peers`);
+    const managed = nodes.some((node) => node.id === id && node.url === source.url);
+    const path = managed
+      ? `/nodes/${encodeURIComponent(id)}/peers`
+      : `/explore-peer?url=${encodeURIComponent(source.url)}`;
+    const response = await request(path);
 
     if (epoch !== peerRequest) {
       return;
@@ -135,10 +139,14 @@ async function refreshPeers(): Promise<void> {
   await expandGraphNode(source.id);
 }
 
-async function request(path: string, init?: RequestInit): Promise<string> {
+async function request(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = 30000,
+): Promise<string> {
   const response = await fetch(path, {
     ...init,
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await response.text();
 
@@ -153,7 +161,9 @@ function disableButtons(disabled: boolean): void {
   const buttons = document.querySelectorAll<HTMLButtonElement>("button");
 
   for (const button of buttons) {
-    button.disabled = disabled;
+    if (button.id !== "graph-expand") {
+      button.disabled = disabled;
+    }
   }
 
   graph.setBusy(disabled);
@@ -404,17 +414,53 @@ element<HTMLFormElement>("services").addEventListener("submit", (event) => {
   const data = new FormData(event.currentTarget as HTMLFormElement);
 
   void run(async () => {
+    const amount = Number(data.get("amount"));
+    let starting = true;
+    let polling = false;
+    status.textContent = `Starting cluster: 0 / ${amount} nodes…`;
+
+    const progress = window.setInterval(async () => {
+      if (polling) {
+        return;
+      }
+
+      polling = true;
+
+      try {
+        const current = JSON.parse(
+          await request("/all-services", undefined, 5000),
+        ) as RunningNode[];
+
+        if (starting) {
+          status.textContent = `Starting cluster: ${current.length} / ${amount} nodes…`;
+          element("node-count").textContent = String(current.length);
+        }
+      } catch {
+        // A progress request must not interrupt the cluster startup request.
+      } finally {
+        polling = false;
+      }
+    }, 1000);
+
     try {
-      await request("/start-services", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from_port: Number(data.get("from_port")),
-          amount: Number(data.get("amount")),
-        }),
-      });
+      // Each node may take up to three seconds to become ready on the server.
+      const timeoutMs = Math.max(30000, amount * 3500 + 10000);
+      await request(
+        "/start-services",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from_port: Number(data.get("from_port")),
+            amount,
+          }),
+        },
+        timeoutMs,
+      );
       showResponse("Services started. Select a node to view its identity.");
     } finally {
+      starting = false;
+      window.clearInterval(progress);
       await refresh();
     }
   });
@@ -465,3 +511,87 @@ element("graph-reset").addEventListener("click", () => {
 });
 
 element("graph-clear").addEventListener("click", resetGraph);
+
+const expandMapButton = element<HTMLButtonElement>("graph-expand");
+const topologyPanel = element("topology-panel");
+let mapExpanded = false;
+const backgroundInert = new Map<HTMLElement, boolean>();
+
+function setMapExpanded(expanded: boolean): void {
+  mapExpanded = expanded;
+  document.body.classList.toggle("map-expanded", expanded);
+  expandMapButton.textContent = expanded ? "Restore view" : "Expand map";
+  expandMapButton.setAttribute("aria-expanded", String(expanded));
+
+  if (expanded) {
+    topologyPanel.setAttribute("role", "dialog");
+    topologyPanel.setAttribute("aria-modal", "true");
+    const background = document.querySelectorAll<HTMLElement>(
+      ".topbar, .sidebar, .workspace-heading, .inspector-grid, .workspace-footer",
+    );
+
+    for (const section of background) {
+      backgroundInert.set(section, section.inert);
+      section.inert = true;
+    }
+  } else {
+    topologyPanel.removeAttribute("role");
+    topologyPanel.removeAttribute("aria-modal");
+
+    for (const [section, inert] of backgroundInert) {
+      section.inert = inert;
+    }
+
+    backgroundInert.clear();
+  }
+
+  graph.resizePreservingView();
+  expandMapButton.focus({ preventScroll: true });
+}
+
+expandMapButton.addEventListener("click", () => {
+  setMapExpanded(!mapExpanded);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (!mapExpanded) {
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setMapExpanded(false);
+    return;
+  }
+
+  if (event.key === "Tab") {
+    const controls = [...topologyPanel.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [tabindex="0"]',
+    )].filter((control) => control.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+});
+
+element("graph-show-all").addEventListener("click", () => {
+  void run(async () => {
+    await refresh();
+    const source = nodes.find((node) => node.id === nodeSelect.value);
+
+    if (!source) {
+      return;
+    }
+
+    graph.showNodes(source, nodes);
+    element("peer-count").textContent = String(graph.exploration.nodes.size);
+    element("peer-context").textContent = `${nodes.length} managed nodes loaded from management. Click any node to discover its connections.`;
+  });
+});

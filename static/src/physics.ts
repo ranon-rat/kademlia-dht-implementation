@@ -10,10 +10,28 @@ export const minimumNodeDistance = 145;
 const linkLength = 215;
 const centerX = 500;
 const centerY = 260;
+const baseLinkStrength = 0.02;
+const identityBits = 64;
+
+export function xorLinkStrength(source: string, target: string): number {
+  // Compute XOR before converting to a floating-point value for the simulation.
+  const distance = BigInt(source) ^ BigInt(target);
+  const logarithmicDistance = distance > 1n ? Math.log2(Number(distance)) : 0;
+
+  // Keep the original stiffness for distant uint64 identities, and make
+  // nearby identities more strongly connected. The +1 handles XOR 0 and 1.
+  return baseLinkStrength * identityBits / (1 + logarithmicDistance);
+}
+
+interface ForceLink {
+  source: string;
+  target: string;
+  strength: number;
+}
 
 export class ForceLayout {
   readonly particles = new Map<string, Particle>();
-  private links: [string, string][] = [];
+  private links: ForceLink[] = [];
   private root = "";
   private held?: string;
   private heat = 0;
@@ -42,19 +60,25 @@ export class ForceLayout {
       }
 
       let parent = this.particles.get(root);
+      let linked = false;
 
       for (const [source, peers] of neighbors) {
         if (peers.includes(id) && this.particles.has(source)) {
           parent = this.particles.get(source);
+          linked = true;
           break;
         }
       }
 
-      const angle = Number(BigInt(id) % 360n) * Math.PI / 180;
+      const count = this.particles.size;
+      const angle = linked
+        ? Number(BigInt(id) % 360n) * Math.PI / 180
+        : count * 2.399963;
+      const radius = linked ? linkLength : minimumNodeDistance * Math.sqrt(count) * 0.8;
       this.particles.set(id, {
         id,
-        x: id === root ? centerX : (parent?.x ?? centerX) + Math.cos(angle) * linkLength,
-        y: id === root ? centerY : (parent?.y ?? centerY) + Math.sin(angle) * linkLength,
+        x: id === root ? centerX : (parent?.x ?? centerX) + Math.cos(angle) * radius,
+        y: id === root ? centerY : (parent?.y ?? centerY) + Math.sin(angle) * radius,
         vx: 0,
         vy: 0,
       });
@@ -69,7 +93,11 @@ export class ForceLayout {
 
         if (source !== target && !seen.has(key)) {
           seen.add(key);
-          this.links.push([source, target]);
+          this.links.push({
+            source,
+            target,
+            strength: xorLinkStrength(source, target),
+          });
         }
       }
     }
@@ -113,7 +141,7 @@ export class ForceLayout {
       }
     }
 
-    for (const [source, target] of this.links) {
+    for (const { source, target, strength: linkStrength } of this.links) {
       const first = this.particles.get(source);
       const second = this.particles.get(target);
 
@@ -122,7 +150,9 @@ export class ForceLayout {
       }
 
       const direction = this.direction(first, second);
-      const strength = (direction.distance - linkLength) * 0.02 * this.heat;
+      const extension = direction.distance - linkLength;
+      const force = Math.max(-3, Math.min(3, extension * linkStrength));
+      const strength = force * this.heat;
       this.push(first, direction.x * strength, direction.y * strength);
       this.push(second, -direction.x * strength, -direction.y * strength);
     }

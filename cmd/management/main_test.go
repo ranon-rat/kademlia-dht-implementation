@@ -63,3 +63,41 @@ func TestSelectedNodeAndExactIdentity(t *testing.T) {
 		t.Fatalf("unexpected method status: %d", response.Code)
 	}
 }
+
+func TestExplorePeerOutsideManagementList(t *testing.T) {
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/peers" || r.Method != "GET" {
+			t.Errorf("unexpected peer request: %s %s", r.Method, r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"id":18446744073709551615,"value":"http://localhost:9002"}]`))
+	}))
+	defer peer.Close()
+	response := httptest.NewRecorder()
+	Router().ServeHTTP(response, httptest.NewRequest("GET", "/explore-peer?url="+peer.URL, nil))
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "18446744073709551615") {
+		t.Fatalf("external peer: %d %s", response.Code, response.Body)
+	}
+}
+
+func TestExplorePeerReportsFailures(t *testing.T) {
+	for _, address := range []string{"", "ftp://localhost"} {
+		response := httptest.NewRecorder()
+		Router().ServeHTTP(response, httptest.NewRequest("GET", "/explore-peer?url="+address, nil))
+		if response.Code != 400 {
+			t.Errorf("invalid peer URL: %d", response.Code)
+		}
+	}
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	response := httptest.NewRecorder()
+	Router().ServeHTTP(response, httptest.NewRequest("GET", "/explore-peer?url="+peer.URL, nil))
+	if response.Code != 503 {
+		t.Errorf("upstream status: %d", response.Code)
+	}
+	peer.Close()
+	response = httptest.NewRecorder()
+	Router().ServeHTTP(response, httptest.NewRequest("GET", "/explore-peer?url="+peer.URL, nil))
+	if response.Code != 502 {
+		t.Errorf("unreachable peer: %d", response.Code)
+	}
+}

@@ -4,6 +4,6 @@ bin/node
 *.js
 *.mjs
 
-!static/vendor/highlight.min.js
+/static/vendor/
 !static/lookup.test.mjs
 !static/graph.test.mjs

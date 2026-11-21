@@ -51,6 +51,12 @@ export class GraphExploration {
     this.nodes.set(source.id, source);
   }
 
+  addNodes(nodes: GraphNode[]): void {
+    for (const node of nodes) {
+      this.nodes.set(node.id, node);
+    }
+  }
+
   expand(source: GraphNode, peers: GraphNode[]): void {
     if (!this.root) {
       this.reset(source);
@@ -79,6 +85,7 @@ export class PeerGraph {
   private compact?: boolean;
   private layout = new ForceLayout();
   private frame?: number;
+  private fitWhenSettled = false;
   private nodeElements = new Map<string, SVGGElement>();
   private edgeElements: { source: string; target: string; line: SVGLineElement }[] = [];
   private suppressedClick?: string;
@@ -133,6 +140,7 @@ export class PeerGraph {
       }
 
       this.suppressedClick = undefined;
+      this.fitWhenSettled = false;
       const group = (event.target as Element).closest<SVGGElement>(".graph-node");
       const id = group?.dataset.nodeId;
       const particle = id ? this.layout.particles.get(id) : undefined;
@@ -210,6 +218,7 @@ export class PeerGraph {
   }
 
   zoom(factor: number, anchor?: DOMPoint): void {
+    this.fitWhenSettled = false;
     const previousScale = this.scale;
     this.scale = Math.min(5, Math.max(0.2, this.scale * factor));
 
@@ -219,6 +228,12 @@ export class PeerGraph {
       this.centerY = anchor.y + (this.centerY - anchor.y) * ratio;
     }
 
+    this.updateView();
+  }
+
+  resizePreservingView(): void {
+    // Synchronize the breakpoint before ResizeObserver handles the layout change.
+    this.compact = this.container.clientWidth < 500;
     this.updateView();
   }
 
@@ -258,6 +273,21 @@ export class PeerGraph {
     }
 
     this.draw();
+  }
+
+  showNodes(source: GraphNode, nodes: GraphNode[]): void {
+    if (!this.exploration.root) {
+      this.exploration.select(source);
+    }
+
+    this.managed = new Set(nodes.map((node) => node.id));
+
+    this.exploration.addNodes(nodes);
+
+    // Adding a cluster does not invent routing edges between its nodes.
+    this.draw();
+    this.fitView();
+    this.fitWhenSettled = true;
   }
 
   expand(source: GraphNode, peers: GraphNode[], managed: Set<string>): void {
@@ -362,8 +392,8 @@ export class PeerGraph {
       class: `graph-node${selected ? " selected" : ""}${this.exploration.neighbors.has(node.id) ? " expanded" : ""}${managed ? "" : " external"}`,
       "data-node-id": node.id,
       tabindex: "0",
-      role: managed ? "button" : "group",
-      "aria-label": `${selected ? "Selected node" : "Peer"} ${node.url}. ID ${node.id}. XOR distance ${distance}. ${managed ? "Select to expand its neighbors." : "Not managed here."}`,
+      role: "button",
+      "aria-label": `${selected ? "Selected node" : "Peer"} ${node.url}. ID ${node.id}. XOR distance ${distance}. Select to expand its neighbors.`,
     });
     const title = svgElement("title");
     title.textContent = `${node.url}\nID ${node.id}\nXOR ${distance}`;
@@ -402,7 +432,7 @@ export class PeerGraph {
       }
     };
     const explore = () => {
-      if (this.locked || !managed) {
+      if (this.locked) {
         return;
       }
 
@@ -463,11 +493,33 @@ export class PeerGraph {
 
       if (moving) {
         this.wake();
+      } else if (this.fitWhenSettled) {
+        this.fitView();
+        this.fitWhenSettled = false;
       }
     });
   }
 
+  private fitView(): void {
+    const particles = [...this.layout.particles.values()];
+
+    if (particles.length === 0) {
+      return;
+    }
+
+    const left = Math.min(...particles.map((point) => point.x)) - 90;
+    const right = Math.max(...particles.map((point) => point.x)) + 90;
+    const top = Math.min(...particles.map((point) => point.y)) - 90;
+    const bottom = Math.max(...particles.map((point) => point.y)) + 90;
+    const viewHeight = Math.max(bottom - top, (right - left) * height / width);
+    this.scale = Math.min(3, height / viewHeight);
+    this.centerX = (left + right) / 2;
+    this.centerY = (top + bottom) / 2;
+    this.updateView();
+  }
+
   private stop(): void {
+    this.fitWhenSettled = false;
     if (this.frame !== undefined) {
       cancelAnimationFrame(this.frame);
       this.frame = undefined;
@@ -503,7 +555,7 @@ export class PeerGraph {
     const expanded = this.exploration.neighbors.has(node.id);
     const type = selected ? "SOURCE" : "PEER";
     const state = expanded ? "Expanded" : "Click to expand";
-    const hint = managed ? "" : " / Not managed here";
+    const hint = managed ? "" : " / Discovered peer";
     this.detail.textContent = `${type} / ${node.url} / ID ${node.id} / XOR ${distance} / ${state}${hint}`;
   }
 

@@ -15,7 +15,7 @@ type KademliaGlobals struct {
 
 func StartKademliaGlobals(ID uint64, port int) *KademliaGlobals {
 	identity := identity.NewKademliaIdentity(ID, port)
-	routingTable := custom.NewRoutingTable(identity, 64, 6, 4)
+	routingTable := custom.NewRoutingTable(identity, 64, 4, 3)
 	hashMap := new(sync.Map)
 
 	return &KademliaGlobals{
